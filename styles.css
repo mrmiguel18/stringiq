@@ -1,0 +1,88 @@
+:root { 
+  --bg:#0f1115; 
+  --card:#151a22; 
+  --text:#e8eefc; 
+  --muted:#a9b4cc; 
+  --line:#273044; 
+  --accent:#4b79ff;
+  --success:#28a745;
+}
+
+*{box-sizing:border-box;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;}
+
+body{
+  margin:0;
+  background:linear-gradient(180deg,#0b0d12,#0f1115);
+  color:var(--text);
+  overscroll-behavior-y: contain; /* Prevents "pull-to-refresh" bounce on mobile */
+}
+
+.topbar{padding:20px 18px;border-bottom:1px solid var(--line); display: flex; justify-content: space-between; align-items: center;}
+.topbar h1{margin:0;font-size:28px;}
+.sub{margin:6px 0 0;color:var(--muted);}
+
+.wrap{max-width:980px;margin:0 auto;padding:18px;display:grid;gap:16px;grid-template-columns:1fr 1fr;}
+@media (max-width: 900px){ .wrap{grid-template-columns:1fr;} }
+
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;box-shadow:0 8px 30px rgba(0,0,0,.25);}
+.card h2{margin:0 0 12px;font-size:18px;}
+
+/* Form Styles */
+.form label{display:block;margin:10px 0;color:var(--muted);font-size:13px;}
+.form input, .form select, .form textarea{
+  width:100%;margin-top:6px;background:#0f141c;border:1px solid var(--line);
+  color:var(--text);padding:10px 12px;border-radius:10px;outline:none;
+}
+.form input:focus, .form select:focus, .form textarea:focus{border-color:var(--accent);}
+
+/* Buttons */
+.row{display:flex;gap:10px;align-items:center;margin-top:12px;}
+.space{justify-content:space-between;margin-top:0;}
+.btn{
+  border:1px solid var(--line);
+  background:#0f141c;
+  color:var(--text);
+  padding:10px 12px;
+  border-radius:10px;
+  cursor:pointer;
+  font-size: 13px;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.btn.primary{background:#2f6bff;border-color:#2f6bff;}
+.btn.secondary{background: transparent; border-color: var(--line); color: var(--muted);}
+.btn:hover{filter:brightness(1.2); transform: translateY(-1px);}
+.btn:active{transform: translateY(0);}
+
+/* Data Management Section (Export/Import) */
+.data-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* List & Items */
+.search{width:220px;background:#0f141c;border:1px solid var(--line);color:var(--text);padding:10px 12px;border-radius:10px;}
+.list{display:grid;gap:10px;margin-top:10px;}
+.item{border:1px solid var(--line);background:#0f141c;border-radius:12px;padding:12px; transition: border-color 0.3s;}
+.item:hover { border-color: var(--accent); }
+.item .title{display:flex;justify-content:space-between;gap:10px;align-items:center;}
+.item h3{margin:0;font-size:16px;}
+
+.badges{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;color:var(--muted);font-size:12px;}
+.badge{border:1px solid var(--line);padding:4px 8px;border-radius:999px;}
+
+.item p{margin:8px 0 0;color:var(--muted);font-size:13px;white-space:pre-wrap;}
+.actions{display:flex;gap:8px;margin-top:10px;}
+.empty{color:var(--muted);padding:10px 2px;display:none;}
+
+/* Success Animation */
+@keyframes savePop {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.05); background-color: var(--success); }
+  100% { transform: scale(1); }
+}
+.save-success {
+  animation: savePop 0.4s ease-out;
+}
