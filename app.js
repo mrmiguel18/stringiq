@@ -1,4 +1,4 @@
-/* StringIQ — app.js (Firebase Auth + Approval Gate + History) */
+/* StringIQ — app.js (Firebase Auth + Auto-Approval + Ownership Control) */
 
 // 1. YOUR FIREBASE CONFIG
 const firebaseConfig = {
@@ -18,23 +18,31 @@ const auth = firebase.auth();
 const googleProvider = new firebase.auth.GoogleAuthProvider();
 const $ = (id) => document.getElementById(id);
 
-// --- AUTHENTICATION & APPROVAL GATE ---
+let currentUserRole = "player"; // Global to track admin vs player
+
+// --- AUTHENTICATION & AUTO-APPROVAL GATE ---
 auth.onAuthStateChanged(async (user) => {
     if (user) {
         try {
-            // Check if user's email exists in the 'approved_users' collection
-            const doc = await db.collection("approved_users").doc(user.email.toLowerCase()).get();
+            const email = user.email.toLowerCase();
+            let doc = await db.collection("approved_users").doc(email).get();
             
-            if (doc.exists) {
-                $("authScreen").style.display = "none";
-                $("appContent").style.display = "block";
-                initApp(); // Initialize data only after approval
-            } else {
-                alert(`Access Pending: ${user.email} is not yet approved. Please contact the administrator.`);
-                auth.signOut();
+            // Auto-Approve: If user doesn't exist in Firestore, create them as a 'player'
+            if (!doc.exists) {
+                await db.collection("approved_users").doc(email).set({
+                    role: "player",
+                    createdAt: Date.now()
+                });
+                doc = await db.collection("approved_users").doc(email).get();
             }
+
+            currentUserRole = doc.data().role || "player";
+            $("authScreen").style.display = "none";
+            $("appContent").style.display = "block";
+            initApp(); 
+            
         } catch (error) {
-            console.error("Approval check failed:", error);
+            console.error("Auth state error:", error);
             auth.signOut();
         }
     } else {
@@ -50,7 +58,7 @@ async function handleGoogleLogin() {
 }
 
 async function handleEmailLogin() {
-    const email = $("loginEmail").value;
+    const email = $("loginEmail").value.toLowerCase().trim();
     const pass = $("loginPass").value;
     if(!email || !pass) return alert("Please enter email and password.");
     try { await auth.signInWithEmailAndPassword(email, pass); }
@@ -58,11 +66,12 @@ async function handleEmailLogin() {
 }
 
 async function handleEmailSignUp() {
-    const email = $("loginEmail").value;
+    const email = $("loginEmail").value.toLowerCase().trim();
     const pass = $("loginPass").value;
     if(!email || !pass) return alert("Please enter email and password.");
-    if(confirm("Create account? You will need admin approval to see data.")) {
-        try { await auth.createUserWithEmailAndPassword(email, pass); }
+    
+    if(confirm("Create account? You will be automatically authorized as a player.")) {
+        try { await auth.createUserWithEmailAndPassword(email, pass); } 
         catch (e) { alert(e.message); }
     }
 }
@@ -74,6 +83,13 @@ async function handleResetPassword() {
         await auth.sendPasswordResetEmail(email);
         alert("Password reset link sent to your email.");
     } catch (e) { alert(e.message); }
+}
+
+async function handleLogout() {
+    if(confirm("Log out of StringIQ?")) {
+        await auth.signOut();
+        location.reload();
+    }
 }
 
 // --- DATA & UI LOGIC ---
@@ -118,6 +134,7 @@ function render() {
   const list = $("playerList");
   const sortVal = $("sortBy")?.value || "name";
   const q = ($("search")?.value || "").toLowerCase().trim();
+  const userEmail = auth.currentUser?.email.toLowerCase();
   
   let filtered = allPlayers.filter(p => (p.name || "").toLowerCase().includes(q));
 
@@ -135,14 +152,17 @@ function render() {
     const div = document.createElement("div");
     div.className = "item";
     const setupHigh = Number(p.setupRating) >= 85;
+
+    // OWNERSHIP CHECK: Show edit/delete only if creator or admin
+    const canEdit = (p.lastUpdatedBy === userEmail) || (currentUserRole === "admin");
     
     div.innerHTML = `
       <div class="title">
         <h3>${escapeHtml(p.name)}</h3>
         <div class="actions">
           <button class="btn" style="font-size:11px; padding:4px 8px;" onclick="viewHistory('${p.id}')">History</button>
-          <button class="btn" data-edit="${p.id}">Edit</button>
-          <button class="btn" data-del="${p.id}">Delete</button>
+          ${canEdit ? `<button class="btn" data-edit="${p.id}">Edit</button>` : ""}
+          ${canEdit ? `<button class="btn" data-del="${p.id}">Delete</button>` : ""}
         </div>
       </div>
       <div class="badges">
@@ -154,6 +174,7 @@ function render() {
         <span class="badge">${p.tensionMain}/${p.tensionCross} lbs</span>
       </div>
       ${p.notes ? `<p>${escapeHtml(p.notes)}</p>` : ""}
+      <div style="font-size:10px; color:gray; margin-top:5px;">Added by: ${p.lastUpdatedBy || 'System'}</div>
     `;
     list.appendChild(div);
   });
@@ -174,7 +195,9 @@ async function viewHistory(playerId) {
 
 async function deletePlayer(id) {
     if (confirm("Are you sure? This cannot be undone.")) {
-        await db.collection("players").doc(id).delete();
+        try {
+            await db.collection("players").doc(id).delete();
+        } catch(e) { alert("Permission Denied: You do not have access to delete this."); }
     }
 }
 
@@ -238,7 +261,6 @@ $("playerForm").addEventListener("submit", async (e) => {
   const id = $("playerId").value || uid();
   const existingPlayer = allPlayers.find(p => p.id === id);
 
-  // Auto-Archive history if updating
   if (existingPlayer) {
     try {
         await db.collection("players").doc(id).collection("history").add({
@@ -266,7 +288,7 @@ $("playerForm").addEventListener("submit", async (e) => {
     crossRating: $("crossStringRating").value,
     notes: $("notes").value.trim(),
     updatedAt: Date.now(),
-    lastUpdatedBy: auth.currentUser.email
+    lastUpdatedBy: auth.currentUser.email.toLowerCase()
   };
 
   if (!data.name) return alert("Name required.");
@@ -276,7 +298,7 @@ $("playerForm").addEventListener("submit", async (e) => {
     resetForm();
     alert("Saved successfully!");
   } catch (err) {
-    alert("Firebase Error: " + err.message);
+    alert("Permission Denied: You do not have access to edit this entry.");
   }
 });
 
@@ -339,9 +361,10 @@ document.addEventListener("click", e => {
   if (e.target.dataset.del) deletePlayer(e.target.dataset.del);
 });
 
-$("search").addEventListener("input", render);
-$("sortBy").addEventListener("change", render);
-$("cancelEdit").addEventListener("click", resetForm);
+if($("search")) $("search").addEventListener("input", render);
+if($("sortBy")) $("sortBy").addEventListener("change", render);
+if($("cancelEdit")) $("cancelEdit").addEventListener("click", resetForm);
+if($("logoutBtn")) $("logoutBtn").addEventListener("click", handleLogout);
 
 // --- PWA INSTALL LOGIC ---
 window.addEventListener('beforeinstallprompt', (e) => {
