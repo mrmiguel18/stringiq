@@ -1,4 +1,4 @@
-/* StringIQ — app.js (Firebase Cloud + Admin PIN + Smart Install + History) */
+/* StringIQ — app.js (Firebase Auth + Approval Gate + History) */
 
 // 1. YOUR FIREBASE CONFIG
 const firebaseConfig = {
@@ -14,12 +14,72 @@ const firebaseConfig = {
 // 2. INITIALIZE FIREBASE
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
+const auth = firebase.auth();
+const googleProvider = new firebase.auth.GoogleAuthProvider();
 const $ = (id) => document.getElementById(id);
 
-// --- SECURITY SETTINGS ---
-const MASTER_PIN = "1234"; // CHANGE THIS to your preferred 4-digit code
+// --- AUTHENTICATION & APPROVAL GATE ---
+auth.onAuthStateChanged(async (user) => {
+    if (user) {
+        try {
+            // Check if user's email exists in the 'approved_users' collection
+            const doc = await db.collection("approved_users").doc(user.email.toLowerCase()).get();
+            
+            if (doc.exists) {
+                $("authScreen").style.display = "none";
+                $("appContent").style.display = "block";
+                initApp(); // Initialize data only after approval
+            } else {
+                alert(`Access Pending: ${user.email} is not yet approved. Please contact the administrator.`);
+                auth.signOut();
+            }
+        } catch (error) {
+            console.error("Approval check failed:", error);
+            auth.signOut();
+        }
+    } else {
+        $("authScreen").style.display = "flex";
+        $("appContent").style.display = "none";
+    }
+});
 
-// --- THE MASTER INDEX ---
+// Auth Handlers
+async function handleGoogleLogin() {
+    try { await auth.signInWithPopup(googleProvider); } 
+    catch (e) { alert(e.message); }
+}
+
+async function handleEmailLogin() {
+    const email = $("loginEmail").value;
+    const pass = $("loginPass").value;
+    if(!email || !pass) return alert("Please enter email and password.");
+    try { await auth.signInWithEmailAndPassword(email, pass); }
+    catch (e) { alert(e.message); }
+}
+
+async function handleEmailSignUp() {
+    const email = $("loginEmail").value;
+    const pass = $("loginPass").value;
+    if(!email || !pass) return alert("Please enter email and password.");
+    if(confirm("Create account? You will need admin approval to see data.")) {
+        try { await auth.createUserWithEmailAndPassword(email, pass); }
+        catch (e) { alert(e.message); }
+    }
+}
+
+async function handleResetPassword() {
+    const email = $("loginEmail").value;
+    if(!email) return alert("Please enter your email address first.");
+    try {
+        await auth.sendPasswordResetEmail(email);
+        alert("Password reset link sent to your email.");
+    } catch (e) { alert(e.message); }
+}
+
+// --- DATA & UI LOGIC ---
+let allPlayers = []; 
+let deferredPrompt;
+
 const RACKET_DATA = {
   "Yonex": ["EZONE 98", "EZONE 98 Tour", "EZONE 100", "EZONE 100 Tour", "EZONE 98+", "VCORE 95", "VCORE 98", "VCORE 98 Tour", "VCORE 100", "VCORE 100 Tour", "Percept 97", "Percept 97D", "Percept 100", "Percept 100D"],
   "Wilson": ["Blade 98 (16x19) V9", "Blade 98 (18x20) V9", "Blade 100 V9", "Blade 100L", "Pro Staff 97 V14", "Pro Staff RF97", "Pro Staff X (100)", "Ultra 100 V4", "Ultra 100 Tour", "Ultra 108", "Clash 98 V2", "Clash 100 V2", "Clash 100 Pro"],
@@ -42,61 +102,16 @@ const STRING_DATA = {
   "Generic": ["Natural Gut", "Synthetic Gut", "Multifilament", "Poly"]
 };
 
-let crossTouched = false;
-let allPlayers = []; 
-let deferredPrompt;
-
-// --- INSTALL LOGIC ---
-const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-const isStandalone = window.matchMedia('(display-mode: standalone)').matches;
-
-window.addEventListener('load', () => {
-  if (!isStandalone) {
-    if (isIOS || /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)) {
-      if($("installBanner")) $("installBanner").style.display = "block";
-    }
-  }
-});
-
-window.addEventListener('beforeinstallprompt', (e) => {
-  e.preventDefault();
-  deferredPrompt = e;
-  if($("installBanner")) $("installBanner").style.display = "block";
-});
-
-if($("installBtn")) {
-    $("installBtn").addEventListener('click', () => {
-      if (isIOS) {
-        if($("iosPrompt")) $("iosPrompt").style.display = "block";
-      } else if (deferredPrompt) {
-        deferredPrompt.prompt();
-        deferredPrompt.userChoice.then((choice) => {
-          if (choice.outcome === 'accepted') $("installBanner").style.display = "none";
-          deferredPrompt = null;
-        });
-      }
+function initApp() {
+    db.collection("players").onSnapshot((snapshot) => {
+        allPlayers = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        render();
     });
+    initDropdowns();
 }
 
-// --- CLOUD HELPERS ---
 function uid() { return Math.random().toString(16).slice(2) + Date.now().toString(16); }
 function escapeHtml(str) { return String(str || "").replace(/[&<>"']/g, s => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[s])); }
-
-function showSuccess(btn, text = "Success!") {
-  const original = btn.textContent;
-  btn.textContent = "✅ " + text;
-  btn.classList.add("save-success");
-  setTimeout(() => {
-    btn.textContent = original;
-    btn.classList.remove("save-success");
-  }, 2000);
-}
-
-// --- CLOUD SYNC ---
-db.collection("players").onSnapshot((snapshot) => {
-    allPlayers = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    render();
-});
 
 // --- RENDER & SORT ---
 function render() {
@@ -144,36 +159,28 @@ function render() {
   });
 }
 
-// --- HISTORY VIEW ---
+// --- HISTORY & CRUD ---
 async function viewHistory(playerId) {
     const snap = await db.collection("players").doc(playerId).collection("history").orderBy("archivedAt", "desc").limit(5).get();
-    if (snap.empty) return alert("No previous setups recorded for this player.");
+    if (snap.empty) return alert("No previous setups recorded.");
     
     let historyText = "Recent History:\n------------------\n";
     snap.forEach(doc => {
         const d = doc.data();
-        const date = new Date(d.archivedAt).toLocaleDateString();
-        historyText += `📅 ${date}\n🎾 ${d.racketModel}\n🧵 ${d.mainString}/${d.crossString}\n⚡ ${d.tensionMain}/${d.tensionCross} lbs\n⭐ Rating: ${d.setupRating}/100\n------------------\n`;
+        historyText += `📅 ${new Date(d.archivedAt).toLocaleDateString()}\n🎾 ${d.racketModel}\n🧵 ${d.mainString}/${d.crossString}\n⚡ ${d.tensionMain}/${d.tensionCross} lbs\n⭐ Rating: ${d.setupRating}/100\n------------------\n`;
     });
     alert(historyText);
 }
 
-// --- CRUD ---
 async function deletePlayer(id) {
-    const pin = prompt("Enter Admin PIN to delete:");
-    if (pin === MASTER_PIN) {
-        if (confirm("Are you sure? This cannot be undone.")) {
-            await db.collection("players").doc(id).delete();
-        }
-    } else {
-        alert("Incorrect PIN.");
+    if (confirm("Are you sure? This cannot be undone.")) {
+        await db.collection("players").doc(id).delete();
     }
 }
 
 function resetForm() {
   $("playerId").value = "";
   $("playerForm").reset();
-  crossTouched = false;
   if ($("mainStringRatingVal")) $("mainStringRatingVal").textContent = "50";
   if ($("crossStringRatingVal")) $("crossStringRatingVal").textContent = "50";
   ["racketCustomWrap", "mainCustomWrap", "crossCustomWrap", "patternCustomWrap"].forEach(id => {
@@ -228,15 +235,10 @@ function editPlayer(id) {
 $("playerForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   
-  if ($("adminPin").value !== MASTER_PIN) {
-    alert("Incorrect Admin PIN. Changes not saved.");
-    return;
-  }
-
   const id = $("playerId").value || uid();
   const existingPlayer = allPlayers.find(p => p.id === id);
 
-  // Archive history if updating existing player
+  // Auto-Archive history if updating
   if (existingPlayer) {
     try {
         await db.collection("players").doc(id).collection("history").add({
@@ -263,16 +265,16 @@ $("playerForm").addEventListener("submit", async (e) => {
     mainRating: $("mainStringRating").value,
     crossRating: $("crossStringRating").value,
     notes: $("notes").value.trim(),
-    updatedAt: Date.now()
+    updatedAt: Date.now(),
+    lastUpdatedBy: auth.currentUser.email
   };
 
   if (!data.name) return alert("Name required.");
 
   try {
     await db.collection("players").doc(id).set(data);
-    showSuccess(e.target.querySelector('button[type="submit"]'), "Saved to Cloud!");
     resetForm();
-    $("adminPin").value = ""; 
+    alert("Saved successfully!");
   } catch (err) {
     alert("Firebase Error: " + err.message);
   }
@@ -296,11 +298,13 @@ function initDropdowns() {
   populate($("stringCross"), STRING_DATA);
   
   const tm = $("tensionMain"), tc = $("tensionCross");
-  for (let i = 30; i <= 75; i++) {
-      tm.add(new Option(`${i} lbs`, String(i)));
-      tc.add(new Option(`${i} lbs`, String(i)));
+  if (tm.options.length < 5) {
+      for (let i = 30; i <= 75; i++) {
+          tm.add(new Option(`${i} lbs`, String(i)));
+          tc.add(new Option(`${i} lbs`, String(i)));
+      }
+      tm.value = "52"; tc.value = "50";
   }
-  tm.value = "52"; tc.value = "50";
   hookCustomToggles();
   hookSliders();
 }
@@ -329,7 +333,8 @@ function getStringValue(sel, cus) {
   return (sel.value === "Custom...") ? (cus?.value || "").trim() : sel.value;
 }
 
-$("playerList").addEventListener("click", e => {
+// Global Click Listeners
+document.addEventListener("click", e => {
   if (e.target.dataset.edit) editPlayer(e.target.dataset.edit);
   if (e.target.dataset.del) deletePlayer(e.target.dataset.del);
 });
@@ -338,4 +343,18 @@ $("search").addEventListener("input", render);
 $("sortBy").addEventListener("change", render);
 $("cancelEdit").addEventListener("click", resetForm);
 
-initDropdowns();
+// --- PWA INSTALL LOGIC ---
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  if($("installBanner")) $("installBanner").style.display = "block";
+});
+
+if($("installBtn")) {
+    $("installBtn").addEventListener('click', () => {
+      if (deferredPrompt) {
+        deferredPrompt.prompt();
+        deferredPrompt.userChoice.then(() => { deferredPrompt = null; });
+      }
+    });
+}
