@@ -27,7 +27,7 @@ auth.onAuthStateChanged(async (user) => {
             const email = user.email.toLowerCase();
             let doc = await db.collection("approved_users").doc(email).get();
             
-            // Auto-Approve: If user doesn't exist in Firestore, create them as a 'player'
+            // Auto-Approval: If user doesn't exist in Firestore yet, they get role 'player'
             if (!doc.exists) {
                 await db.collection("approved_users").doc(email).set({
                     role: "player",
@@ -88,7 +88,6 @@ async function handleResetPassword() {
 async function handleLogout() {
     if(confirm("Log out of StringIQ?")) {
         await auth.signOut();
-        location.reload();
     }
 }
 
@@ -153,7 +152,7 @@ function render() {
     div.className = "item";
     const setupHigh = Number(p.setupRating) >= 85;
 
-    // OWNERSHIP CHECK: Show edit/delete only if creator or admin
+    // OWNERSHIP CHECK: Only show Edit/Delete if user is owner or admin
     const canEdit = (p.lastUpdatedBy === userEmail) || (currentUserRole === "admin");
     
     div.innerHTML = `
@@ -197,7 +196,7 @@ async function deletePlayer(id) {
     if (confirm("Are you sure? This cannot be undone.")) {
         try {
             await db.collection("players").doc(id).delete();
-        } catch(e) { alert("Permission Denied: You do not have access to delete this."); }
+        } catch(e) { alert("Permission Denied: You do not have permission to delete this."); }
     }
 }
 
@@ -361,10 +360,9 @@ document.addEventListener("click", e => {
   if (e.target.dataset.del) deletePlayer(e.target.dataset.del);
 });
 
-if($("search")) $("search").addEventListener("input", render);
-if($("sortBy")) $("sortBy").addEventListener("change", render);
-if($("cancelEdit")) $("cancelEdit").addEventListener("click", resetForm);
-if($("logoutBtn")) $("logoutBtn").addEventListener("click", handleLogout);
+$("search").addEventListener("input", render);
+$("sortBy").addEventListener("change", render);
+$("cancelEdit").addEventListener("click", resetForm);
 
 // --- PWA INSTALL LOGIC ---
 window.addEventListener('beforeinstallprompt', (e) => {
