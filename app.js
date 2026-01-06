@@ -1,5 +1,19 @@
-/* StringIQ — app.js */
-const KEY = "stringiq_players_v1";
+/* StringIQ — app.js (Firebase Cloud Version) */
+
+// 1. YOUR FIREBASE CONFIG
+const firebaseConfig = {
+    apiKey: "AIzaSyCfSVizTInAFx0zDyt6JDsfHUpVvN6BELY",
+    authDomain: "stringiq-c6c09.firebaseapp.com",
+    projectId: "stringiq-c6c09",
+    storageBucket: "stringiq-c6c09.firebasestorage.app",
+    messagingSenderId: "884545730906",
+    appId: "1:884545730906:web:9e448908d02d13b5d09b63",
+    measurementId: "G-0W0HP22NF9"
+};
+
+// 2. INITIALIZE FIREBASE
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
 const $ = (id) => document.getElementById(id);
 
 // --- THE MASTER INDEX ---
@@ -26,17 +40,12 @@ const STRING_DATA = {
 };
 
 let crossTouched = false;
+let allPlayers = []; // Global store for searching/sorting
 
-// --- HELPERS ---
-function loadPlayers() {
-  try { return JSON.parse(localStorage.getItem(KEY)) ?? []; }
-  catch { return []; }
-}
-function savePlayers(players) { localStorage.setItem(KEY, JSON.stringify(players)); }
+// --- CLOUD HELPERS ---
 function uid() { return Math.random().toString(16).slice(2) + Date.now().toString(16); }
 function escapeHtml(str) { return String(str || "").replace(/[&<>"']/g, s => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[s])); }
 
-// Visual Feedback Helper
 function showSuccess(btn, text = "Success!") {
   const original = btn.textContent;
   btn.textContent = "✅ " + text;
@@ -47,115 +56,11 @@ function showSuccess(btn, text = "Success!") {
   }, 2000);
 }
 
-// --- EXPORT / IMPORT LOGIC ---
-function exportData() {
-  const players = loadPlayers();
-  if (!players.length) return alert("No data to export!");
-  
-  const blob = new Blob([JSON.stringify(players, null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `stringiq_backup_${new Date().toISOString().slice(0,10)}.json`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-function handleImport(e) {
-  const file = e.target.files[0];
-  if (!file) return;
-
-  const reader = new FileReader();
-  reader.onload = (event) => {
-    try {
-      const imported = JSON.parse(event.target.result);
-      if (!Array.isArray(imported)) throw new Error();
-      
-      if (confirm(`Import ${imported.length} players? This will add to your current list.`)) {
-        const current = loadPlayers();
-        const merged = [...current, ...imported];
-        const unique = Array.from(new Map(merged.map(p => [p.id, p])).values());
-        
-        savePlayers(unique);
-        render();
-        alert("Import Successful!");
-      }
-    } catch (err) {
-      alert("Invalid backup file.");
-    }
-  };
-  reader.readAsText(file);
-  e.target.value = ""; 
-}
-
-// --- INITIALIZATION ---
-function initDropdowns() {
-  const populate = (el, data) => {
-    if (!el) return;
-    el.innerHTML = '<option value="">-- Select --</option>';
-    for (const [brand, models] of Object.entries(data)) {
-      const group = document.createElement("optgroup");
-      group.label = brand;
-      models.forEach(m => group.appendChild(new Option(`${brand} ${m}`, `${brand} ${m}`)));
-      el.appendChild(group);
-    }
-    el.add(new Option("Custom...", "Custom..."));
-  };
-
-  populate($("racketModel"), RACKET_DATA);
-  populate($("stringMain"), STRING_DATA);
-  populate($("stringCross"), STRING_DATA);
-
-  const tMain = $("tensionMain"), tCross = $("tensionCross");
-  if (tMain && tCross) {
-    tMain.innerHTML = ""; tCross.innerHTML = "";
-    for (let i = 30; i <= 75; i++) {
-      tMain.add(new Option(`${i} lbs`, String(i)));
-      tCross.add(new Option(`${i} lbs`, String(i)));
-    }
-    tMain.value = "52"; tCross.value = "50";
-  }
-  hookCustomToggles();
-  hookSliders();
-  hookAutoCrossTension();
-}
-
-function hookCustomToggles() {
-  const toggle = (selectId, wrapId) => {
-    const sel = $(selectId), wrap = $(wrapId);
-    if (!sel || !wrap) return;
-    const apply = () => wrap.style.display = (sel.value === "Custom...") ? "block" : "none";
-    sel.addEventListener("change", apply);
-    apply();
-  };
-  toggle("racketModel", "racketCustomWrap");
-  toggle("stringMain", "mainCustomWrap");
-  toggle("stringCross", "crossCustomWrap");
-  toggle("pattern", "patternCustomWrap");
-}
-
-function hookSliders() {
-  [$("mainStringRating"), $("crossStringRating")].forEach(s => {
-    if (!s) return;
-    const valDisplay = $(s.id + "Val");
-    s.addEventListener("input", () => { if(valDisplay) valDisplay.textContent = s.value; });
-  });
-}
-
-function hookAutoCrossTension() {
-  const tm = $("tensionMain"), tc = $("tensionCross");
-  if (!tm || !tc) return;
-  tc.addEventListener("change", () => crossTouched = true);
-  tm.addEventListener("change", () => {
-    if ($("playerId").value || crossTouched) return;
-    tc.value = String(Math.max(30, parseInt(tm.value) - 2));
-  });
-}
-
-function getStringValue(sel, cus) {
-  if (!sel) return "";
-  return (sel.value === "Custom...") ? (cus?.value || "").trim() : sel.value;
-}
+// --- CLOUD SYNC (The "Magic" Part) ---
+db.collection("players").onSnapshot((snapshot) => {
+    allPlayers = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    render();
+});
 
 // --- RENDER & SORT ---
 function render() {
@@ -163,9 +68,9 @@ function render() {
   const sortVal = $("sortBy")?.value || "name";
   const q = ($("search")?.value || "").toLowerCase().trim();
   
-  let players = loadPlayers().filter(p => (p.name || "").toLowerCase().includes(q));
+  let filtered = allPlayers.filter(p => (p.name || "").toLowerCase().includes(q));
 
-  players.sort((a, b) => {
+  filtered.sort((a, b) => {
     if (sortVal === "ratingHigh") return (Number(b.setupRating) || 0) - (Number(a.setupRating) || 0);
     if (sortVal === "ratingLow") return (Number(a.setupRating) || 0) - (Number(b.setupRating) || 0);
     if (sortVal === "newest") return (b.updatedAt || 0) - (a.updatedAt || 0);
@@ -173,9 +78,9 @@ function render() {
   });
 
   list.innerHTML = "";
-  $("empty").style.display = players.length ? "none" : "block";
+  $("empty").style.display = filtered.length ? "none" : "block";
 
-  players.forEach(p => {
+  filtered.forEach(p => {
     const div = document.createElement("div");
     div.className = "item";
     const setupHigh = Number(p.setupRating) >= 85;
@@ -193,7 +98,7 @@ function render() {
           Setup: ${p.setupRating || 0}/100 ${setupHigh ? '🔥' : ''}
         </span>
         <span class="badge">UTR: ${p.utr || 'N/A'}</span>
-        <span class="badge">${escapeHtml(p.racketModel)} (${escapeHtml(p.pattern || 'N/A')})</span>
+        <span class="badge">${escapeHtml(p.racketModel)}</span>
         <span class="badge">${p.tensionMain}/${p.tensionCross} lbs</span>
       </div>
       ${p.notes ? `<p>${escapeHtml(p.notes)}</p>` : ""}
@@ -203,6 +108,12 @@ function render() {
 }
 
 // --- CRUD ---
+async function deletePlayer(id) {
+    if (confirm("Delete this player?")) {
+        await db.collection("players").doc(id).delete();
+    }
+}
+
 function resetForm() {
   $("playerId").value = "";
   $("playerForm").reset();
@@ -215,7 +126,7 @@ function resetForm() {
 }
 
 function editPlayer(id) {
-  const p = loadPlayers().find(x => x.id === id);
+  const p = allPlayers.find(x => x.id === id);
   if (!p) return;
   $("playerId").value = p.id;
   $("name").value = p.name || "";
@@ -257,11 +168,11 @@ function editPlayer(id) {
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-$("playerForm").addEventListener("submit", (e) => {
+// --- FORM HANDLING ---
+$("playerForm").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const players = loadPlayers();
+  const id = $("playerId").value || uid();
   const data = {
-    id: $("playerId").value || uid(),
     name: $("name").value.trim(),
     utr: $("utr").value,
     age: $("age").value,
@@ -281,41 +192,73 @@ $("playerForm").addEventListener("submit", (e) => {
     updatedAt: Date.now()
   };
 
-  if (!data.name) {
-    alert("Please enter a player name.");
-    return;
-  }
+  if (!data.name) return alert("Name required.");
 
-  const idx = players.findIndex(p => p.id === data.id);
-  if (idx > -1) players[idx] = data; else players.push(data);
-  savePlayers(players);
+  await db.collection("players").doc(id).set(data);
   
   const submitBtn = e.target.querySelector('button[type="submit"]');
-  showSuccess(submitBtn, "Saved!");
-
+  showSuccess(submitBtn, "Saved to Cloud!");
   resetForm();
-  render();
 });
+
+// --- UI HELPERS ---
+function initDropdowns() {
+  const populate = (el, data) => {
+    if (!el) return;
+    el.innerHTML = '<option value="">-- Select --</option>';
+    for (const [brand, models] of Object.entries(data)) {
+      const group = document.createElement("optgroup");
+      group.label = brand;
+      models.forEach(m => group.appendChild(new Option(`${brand} ${m}`, `${brand} ${m}`)));
+      el.appendChild(group);
+    }
+    el.add(new Option("Custom...", "Custom..."));
+  };
+  populate($("racketModel"), RACKET_DATA);
+  populate($("stringMain"), STRING_DATA);
+  populate($("stringCross"), STRING_DATA);
+  
+  const tm = $("tensionMain"), tc = $("tensionCross");
+  for (let i = 30; i <= 75; i++) {
+      tm.add(new Option(`${i} lbs`, String(i)));
+      tc.add(new Option(`${i} lbs`, String(i)));
+  }
+  tm.value = "52"; tc.value = "50";
+  hookCustomToggles();
+  hookSliders();
+}
+
+function hookCustomToggles() {
+  const toggle = (selectId, wrapId) => {
+    const sel = $(selectId), wrap = $(wrapId);
+    if (!sel || !wrap) return;
+    sel.addEventListener("change", () => wrap.style.display = (sel.value === "Custom...") ? "block" : "none");
+  };
+  toggle("racketModel", "racketCustomWrap");
+  toggle("stringMain", "mainCustomWrap");
+  toggle("stringCross", "crossCustomWrap");
+  toggle("pattern", "patternCustomWrap");
+}
+
+function hookSliders() {
+  [$("mainStringRating"), $("crossStringRating")].forEach(s => {
+    if (!s) return;
+    s.addEventListener("input", () => $(s.id + "Val").textContent = s.value);
+  });
+}
+
+function getStringValue(sel, cus) {
+  if (!sel) return "";
+  return (sel.value === "Custom...") ? (cus?.value || "").trim() : sel.value;
+}
 
 $("playerList").addEventListener("click", e => {
   if (e.target.dataset.edit) editPlayer(e.target.dataset.edit);
-  if (e.target.dataset.del && confirm("Delete?")) {
-    savePlayers(loadPlayers().filter(p => p.id !== e.target.dataset.del));
-    render();
-  }
+  if (e.target.dataset.del) deletePlayer(e.target.dataset.del);
 });
 
 $("search").addEventListener("input", render);
 $("sortBy").addEventListener("change", render);
 $("cancelEdit").addEventListener("click", resetForm);
 
-document.addEventListener("click", e => {
-  if (e.target.id === "exportBtn") exportData();
-  if (e.target.id === "importBtn") $("importFile").click();
-});
-
-if ($("importFile")) $("importFile").addEventListener("change", handleImport);
-
 initDropdowns();
-
-render();
