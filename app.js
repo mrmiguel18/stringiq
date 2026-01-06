@@ -1,4 +1,4 @@
-/* StringIQ — app.js (Firebase Cloud Version) */
+/* StringIQ — app.js (Firebase Cloud + Admin PIN Security) */
 
 // 1. YOUR FIREBASE CONFIG
 const firebaseConfig = {
@@ -15,6 +15,9 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 const $ = (id) => document.getElementById(id);
+
+// --- SECURITY SETTINGS ---
+const MASTER_PIN = "1234"; // CHANGE THIS to your preferred 4-digit code
 
 // --- THE MASTER INDEX ---
 const RACKET_DATA = {
@@ -40,7 +43,7 @@ const STRING_DATA = {
 };
 
 let crossTouched = false;
-let allPlayers = []; // Global store for searching/sorting
+let allPlayers = []; 
 
 // --- CLOUD HELPERS ---
 function uid() { return Math.random().toString(16).slice(2) + Date.now().toString(16); }
@@ -56,7 +59,7 @@ function showSuccess(btn, text = "Success!") {
   }, 2000);
 }
 
-// --- CLOUD SYNC (The "Magic" Part) ---
+// --- CLOUD SYNC ---
 db.collection("players").onSnapshot((snapshot) => {
     allPlayers = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     render();
@@ -109,8 +112,13 @@ function render() {
 
 // --- CRUD ---
 async function deletePlayer(id) {
-    if (confirm("Delete this player?")) {
-        await db.collection("players").doc(id).delete();
+    const pin = prompt("Enter Admin PIN to delete:");
+    if (pin === MASTER_PIN) {
+        if (confirm("Are you sure? This cannot be undone.")) {
+            await db.collection("players").doc(id).delete();
+        }
+    } else {
+        alert("Incorrect PIN.");
     }
 }
 
@@ -168,9 +176,16 @@ function editPlayer(id) {
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-// --- FORM HANDLING ---
+// --- UPDATED SUBMIT HANDLER WITH PIN ---
 $("playerForm").addEventListener("submit", async (e) => {
   e.preventDefault();
+  
+  // Check the PIN first
+  if ($("adminPin").value !== MASTER_PIN) {
+    alert("Incorrect Admin PIN. Changes not saved.");
+    return;
+  }
+
   const id = $("playerId").value || uid();
   const data = {
     name: $("name").value.trim(),
@@ -194,11 +209,14 @@ $("playerForm").addEventListener("submit", async (e) => {
 
   if (!data.name) return alert("Name required.");
 
-  await db.collection("players").doc(id).set(data);
-  
-  const submitBtn = e.target.querySelector('button[type="submit"]');
-  showSuccess(submitBtn, "Saved to Cloud!");
-  resetForm();
+  try {
+    await db.collection("players").doc(id).set(data);
+    showSuccess(e.target.querySelector('button[type="submit"]'), "Saved to Cloud!");
+    resetForm();
+    $("adminPin").value = ""; // Clear PIN after success
+  } catch (err) {
+    alert("Firebase Error: " + err.message);
+  }
 });
 
 // --- UI HELPERS ---
@@ -262,8 +280,3 @@ $("sortBy").addEventListener("change", render);
 $("cancelEdit").addEventListener("click", resetForm);
 
 initDropdowns();
-// This will try to save a test message the second the page loads
-db.collection("test_connection").add({
-    status: "Testing Firebase sync",
-    time: new Date().toISOString()
-}).then(() => console.log("CONNECTION SUCCESSFUL! Check your Firebase Console now."));
