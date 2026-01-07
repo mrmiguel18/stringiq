@@ -111,6 +111,14 @@ function initDropdowns() {
         }
     }
 
+    // Pattern Dropdown Population
+    const pattEl = $("pattern");
+    if (pattEl) {
+        const patterns = ["16x19", "18x20", "16x18", "16x20", "18x19", "14x18"];
+        pattEl.innerHTML = "";
+        patterns.forEach(p => pattEl.add(new Option(p, p)));
+    }
+
     const populateStrings = (el) => {
         if (!el) return;
         el.innerHTML = '<option value="">-- Select String --</option>';
