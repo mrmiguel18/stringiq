@@ -154,12 +154,14 @@ function render() {
         div.className = "item";
         const canEdit = (p.lastUpdatedBy === auth.currentUser.email.toLowerCase()) || (currentUserRole === "admin");
         div.innerHTML = `
-            <div class="title"><h3>${escapeHtml(p.name)}</h3></div>
+            <div class="title"><h3>${escapeHtml(p.name)} (${p.age || '?'})</h3></div>
             <div class="badges">
                 <span class="badge">UTR: ${p.utr || 'N/A'}</span>
-                <span class="badge">${escapeHtml(p.racketModel)}</span>
+                <span class="badge">${p.hand || 'R'}</span>
+                <span class="badge">${escapeHtml(p.racketModel)} [${p.pattern || '16x19'}]</span>
                 <span class="badge">${p.tensionMain}/${p.tensionCross} lbs</span>
                 ${p.usedBallMachine ? '<span class="badge" style="background:#4b79ff; color:white; border:none;">Ball Machine</span>' : ''}
+                <span class="badge" style="border-color:#4b79ff; color:#4b79ff;">Feel: ${p.weeklyFeeling || 50}</span>
             </div>
             <div class="actions" style="margin-top:10px;">
                 ${canEdit ? `<button class="btn" onclick="editPlayer('${p.id}')">Edit</button>` : ""}
@@ -169,20 +171,23 @@ function render() {
     });
 }
 
-// --- UPDATED EDIT & SUBMIT LOGIC ---
+// --- EDIT & SUBMIT LOGIC ---
 function editPlayer(id) {
     const p = allPlayers.find(x => x.id === id);
     if (!p) return;
     $("playerId").value = p.id;
     $("name").value = p.name || "";
+    $("age").value = p.age || "";
     $("utr").value = p.utr || "";
+    $("hand").value = p.hand || "Right";
     $("racketModel").value = p.racketModel || "";
-    $("stringMain").value = p.stringMain || ""; // Added logic
-    $("stringCross").value = p.stringCross || ""; // Added logic
+    $("pattern").value = p.pattern || "16x19";
+    $("stringMain").value = p.stringMain || "";
+    $("stringCross").value = p.stringCross || "";
     $("tensionMain").value = p.tensionMain || "";
     $("tensionCross").value = p.tensionCross || "";
     $("setupRating").value = p.setupRating || "";
-    if($("weeklyFeeling")) $("weeklyFeeling").value = p.weeklyFeeling || 50; // Added logic
+    if($("weeklyFeeling")) $("weeklyFeeling").value = p.weeklyFeeling || 50;
     $("usedBallMachine").checked = p.usedBallMachine || false;
     $("notes").value = p.notes || "";
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -195,14 +200,17 @@ $("playerForm").addEventListener("submit", async (e) => {
 
     const data = {
         name: $("name").value.trim(),
+        age: $("age").value,
         utr: $("utr").value,
+        hand: $("hand").value,
         racketModel: $("racketModel").value,
-        stringMain: $("stringMain").value, // Captured
-        stringCross: $("stringCross").value, // Captured
+        pattern: $("pattern").value,
+        stringMain: $("stringMain").value,
+        stringCross: $("stringCross").value,
         tensionMain: $("tensionMain").value,
         tensionCross: $("tensionCross").value,
         setupRating: $("setupRating").value,
-        weeklyFeeling: $("weeklyFeeling") ? $("weeklyFeeling").value : 50, // Captured
+        weeklyFeeling: $("weeklyFeeling") ? $("weeklyFeeling").value : 50,
         usedBallMachine: machineUsed,
         notes: $("notes").value.trim(),
         updatedAt: Date.now(),
